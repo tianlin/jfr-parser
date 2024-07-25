@@ -2,9 +2,9 @@ package pprof
 
 import (
 	"fmt"
-	"io"
-
 	"github.com/grafana/jfr-parser/parser"
+	"io"
+	"strconv"
 )
 
 func ParseJFR(body []byte, pi *ParseInput, jfrLabels *LabelsSnapshot) (res *Profiles, err error) {
@@ -37,6 +37,29 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 
 		switch typ {
 		case parser.TypeMap.T_EXECUTION_SAMPLE:
+			ctx := builders.contextLabels(parser.ExecutionSample.ContextId)
+			if ctx != nil {
+				var hasThreadInfo bool
+				for kIndex := range ctx.Labels {
+					if builders.jfrLabels.Strings[kIndex] == "thread_id" {
+						hasThreadInfo = true
+					}
+				}
+
+				if !hasThreadInfo {
+					ti := parser.GetThreadInfo(parser.ExecutionSample.SampledThread)
+					if ti != nil {
+						k := addString(builders.jfrLabels, "thread_id")
+						v := addString(builders.jfrLabels,
+							strconv.FormatInt(int64(ti.OsThreadId), 10))
+						ctx.Labels[k] = v
+						k = addString(builders.jfrLabels, "thread_name")
+						v = addString(builders.jfrLabels, ti.OsName)
+						ctx.Labels[k] = v
+					}
+				}
+			}
+
 			ts := parser.GetThreadState(parser.ExecutionSample.State)
 			if ts != nil && ts.Name != "STATE_SLEEPING" {
 				builders.addStacktrace(sampleTypeCPU, parser.ExecutionSample.ContextId, parser.ExecutionSample.StackTrace, values[:1])
@@ -69,4 +92,10 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 	result = builders.build(event)
 
 	return result, nil
+}
+
+func addString(jfrLabels *LabelsSnapshot, s string) int64 {
+	i := int64(len(jfrLabels.Strings)) + 1
+	jfrLabels.Strings[i] = s
+	return i
 }
