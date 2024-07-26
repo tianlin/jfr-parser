@@ -37,7 +37,8 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 
 		switch typ {
 		case parser.TypeMap.T_EXECUTION_SAMPLE:
-			ctx := builders.contextLabels(parser.ExecutionSample.ContextId)
+			ctxId := int64(parser.ExecutionSample.ContextId)
+			ctx := builders.contextLabels(uint64(ctxId))
 			if ctx == nil {
 				ctx = &Context{
 					Labels: make(map[int64]int64),
@@ -45,7 +46,7 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 				if builders.jfrLabels.Contexts == nil {
 					builders.jfrLabels.Contexts = make(map[int64]*Context)
 				}
-				builders.jfrLabels.Contexts[int64(parser.ExecutionSample.ContextId)] = ctx
+				builders.jfrLabels.Contexts[ctxId] = ctx
 			}
 
 			var hasThreadInfo bool
@@ -74,6 +75,9 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 			}
 			if event == "wall" {
 				builders.addStacktrace(sampleTypeWall, parser.ExecutionSample.ContextId, parser.ExecutionSample.StackTrace, values[:1])
+			}
+			if ctxId == 0 {
+				delete(builders.jfrLabels.Contexts, ctxId)
 			}
 		case parser.TypeMap.T_ALLOC_IN_NEW_TLAB:
 			values[1] = int64(parser.ObjectAllocationInNewTLAB.TlabSize)
