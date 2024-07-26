@@ -38,25 +38,33 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 		switch typ {
 		case parser.TypeMap.T_EXECUTION_SAMPLE:
 			ctx := builders.contextLabels(parser.ExecutionSample.ContextId)
-			if ctx != nil {
-				var hasThreadInfo bool
-				for kIndex := range ctx.Labels {
-					if builders.jfrLabels.Strings[kIndex] == "thread_id" {
-						hasThreadInfo = true
-					}
+			if ctx == nil {
+				ctx = &Context{
+					Labels: make(map[int64]int64),
 				}
+				if builders.jfrLabels.Contexts == nil {
+					builders.jfrLabels.Contexts = make(map[int64]*Context)
+				}
+				builders.jfrLabels.Contexts[int64(parser.ExecutionSample.ContextId)] = ctx
+			}
 
-				if !hasThreadInfo {
-					ti := parser.GetThreadInfo(parser.ExecutionSample.SampledThread)
-					if ti != nil {
-						k := addString(builders.jfrLabels, "thread_id")
-						v := addString(builders.jfrLabels,
-							strconv.FormatInt(int64(ti.OsThreadId), 10))
-						ctx.Labels[k] = v
-						k = addString(builders.jfrLabels, "thread_name")
-						v = addString(builders.jfrLabels, ti.OsName)
-						ctx.Labels[k] = v
-					}
+			var hasThreadInfo bool
+			for kIndex := range ctx.Labels {
+				if builders.jfrLabels.Strings[kIndex] == "thread_id" {
+					hasThreadInfo = true
+				}
+			}
+
+			if !hasThreadInfo {
+				ti := parser.GetThreadInfo(parser.ExecutionSample.SampledThread)
+				if ti != nil {
+					k := addString(builders.jfrLabels, "thread_id")
+					v := addString(builders.jfrLabels,
+						strconv.FormatInt(int64(ti.OsThreadId), 10))
+					ctx.Labels[k] = v
+					k = addString(builders.jfrLabels, "thread_name")
+					v = addString(builders.jfrLabels, ti.OsName)
+					ctx.Labels[k] = v
 				}
 			}
 
@@ -95,6 +103,9 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 }
 
 func addString(jfrLabels *LabelsSnapshot, s string) int64 {
+	if jfrLabels.Strings == nil {
+		jfrLabels.Strings = make(map[int64]string)
+	}
 	i := int64(len(jfrLabels.Strings)) + 1
 	jfrLabels.Strings[i] = s
 	return i
