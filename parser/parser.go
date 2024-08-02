@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"unsafe"
@@ -92,6 +93,10 @@ func NewParser(buf []byte, options Options) *Parser {
 		buf:     buf,
 	}
 	return p
+}
+
+func (p *Parser) GetBase64Buf() string {
+	return base64.StdEncoding.EncodeToString(p.buf)
 }
 
 func (p *Parser) ParseEvent() (def.TypeID, error) {
