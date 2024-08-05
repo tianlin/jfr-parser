@@ -64,9 +64,11 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 					v := addString(builders.jfrLabels,
 						strconv.FormatInt(int64(ti.OsThreadId), 10))
 					ctx.Labels[k] = v
+					log.Printf("Add %d:%d", k, v)
 					k = addString(builders.jfrLabels, "thread_name")
 					v = addString(builders.jfrLabels, ti.OsName)
 					ctx.Labels[k] = v
+					log.Printf("Add %d:%d", k, v)
 				} else {
 					log.Printf("can not get thread info %d from %s",
 						parser.ExecutionSample.SampledThread, parser.GetBase64Buf())
