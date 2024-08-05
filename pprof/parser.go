@@ -64,13 +64,13 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 			if !hasThreadInfo {
 				ti := parser.GetThreadInfo(parser.ExecutionSample.SampledThread)
 				if ti != nil {
-					k := addString(builders.jfrLabels, "thread_id")
-					v := addString(builders.jfrLabels,
+					k := addString(builders.jfrLabels, stringIndex, "thread_id")
+					v := addString(builders.jfrLabels, stringIndex,
 						strconv.FormatInt(int64(ti.OsThreadId), 10))
 					ctx.Labels[k] = v
 					log.Printf("Add %d:%d", k, v)
-					k = addString(builders.jfrLabels, "thread_name")
-					v = addString(builders.jfrLabels, ti.OsName)
+					k = addString(builders.jfrLabels, stringIndex, "thread_name")
+					v = addString(builders.jfrLabels, stringIndex, ti.OsName)
 					ctx.Labels[k] = v
 					log.Printf("Add %d:%d", k, v)
 				} else {
