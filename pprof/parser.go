@@ -24,6 +24,10 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 	var event string
 
 	builders := newJfrPprofBuilders(parser, jfrLabels, piOriginal)
+	stringIndex := map[string]int64{}
+	for k, v := range jfrLabels.Strings {
+		stringIndex[v] = k
+	}
 
 	var values = [2]int64{1, 0}
 
@@ -112,13 +116,18 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 	return result, nil
 }
 
-func addString(jfrLabels *LabelsSnapshot, s string) int64 {
+func addString(jfrLabels *LabelsSnapshot, stringIndex map[string]int64, s string) int64 {
+	if i, ok := stringIndex[s]; ok {
+		return i
+	}
+
 	if jfrLabels.Strings == nil {
 		jfrLabels.Strings = make(map[int64]string)
 	}
+
 	i := int64(len(jfrLabels.Strings) + 1)
 	jfrLabels.Strings[i] = s
-
+	stringIndex[s] = i
 	log.Printf("Add string %d:%s\n", i, s)
 	return i
 }
