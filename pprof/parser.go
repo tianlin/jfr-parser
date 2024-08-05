@@ -125,7 +125,7 @@ func addString(jfrLabels *LabelsSnapshot, stringIndex map[string]int64, s string
 		jfrLabels.Strings = make(map[int64]string)
 	}
 
-	i := int64(len(jfrLabels.Strings) + 1)
+	i := int64(len(stringIndex) + 1)
 	jfrLabels.Strings[i] = s
 	stringIndex[s] = i
 	log.Printf("Add string %d:%s\n", i, s)
