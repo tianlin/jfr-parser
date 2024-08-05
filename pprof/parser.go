@@ -116,7 +116,9 @@ func addString(jfrLabels *LabelsSnapshot, s string) int64 {
 	if jfrLabels.Strings == nil {
 		jfrLabels.Strings = make(map[int64]string)
 	}
-	i := int64(len(jfrLabels.Strings)) + 1
+	i := int64(len(jfrLabels.Strings) + 1)
 	jfrLabels.Strings[i] = s
+
+	log.Printf("Add string %d:%s\n", i, s)
 	return i
 }
