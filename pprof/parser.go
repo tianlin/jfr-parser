@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/grafana/jfr-parser/parser"
 	"io"
-	"log"
 	"strconv"
 )
 
@@ -68,14 +67,9 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 					v := addString(builders.jfrLabels, stringIndex,
 						strconv.FormatInt(int64(ti.OsThreadId), 10))
 					ctx.Labels[k] = v
-					log.Printf("Add %d:%d", k, v)
 					k = addString(builders.jfrLabels, stringIndex, "thread_name")
 					v = addString(builders.jfrLabels, stringIndex, ti.OsName)
 					ctx.Labels[k] = v
-					log.Printf("Add %d:%d", k, v)
-				} else {
-					log.Printf("can not get thread info %d from %s",
-						parser.ExecutionSample.SampledThread, parser.GetBase64Buf())
 				}
 			}
 
@@ -128,6 +122,5 @@ func addString(jfrLabels *LabelsSnapshot, stringIndex map[string]int64, s string
 	i := int64(len(stringIndex) + 1)
 	jfrLabels.Strings[i] = s
 	stringIndex[s] = i
-	log.Printf("Add string %d:%s\n", i, s)
 	return i
 }
