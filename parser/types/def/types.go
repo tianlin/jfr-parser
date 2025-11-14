@@ -1,6 +1,8 @@
 package def
 
-type TypeID uint64
+import "golang.org/x/text/encoding"
+
+type TypeID int64
 
 type TypeMap struct {
 	IDMap   map[TypeID]*Class
@@ -9,6 +11,7 @@ type TypeMap struct {
 	T_STRING  TypeID
 	T_INT     TypeID
 	T_LONG    TypeID
+	T_SHORT   TypeID
 	T_FLOAT   TypeID
 	T_BOOLEAN TypeID
 
@@ -26,10 +29,16 @@ type TypeMap struct {
 	T_CLASS_LOADER TypeID
 
 	T_EXECUTION_SAMPLE   TypeID
+	T_WALL_CLOCK_SAMPLE  TypeID
 	T_ALLOC_IN_NEW_TLAB  TypeID
 	T_ALLOC_OUTSIDE_TLAB TypeID
+	T_ALLOC_SAMPLE       TypeID
 	T_LIVE_OBJECT        TypeID
 	T_MONITOR_ENTER      TypeID
 	T_THREAD_PARK        TypeID
 	T_ACTIVE_SETTING     TypeID
+	T_MALLOC             TypeID
+	T_FREE               TypeID
+
+	ISO8859_1Decoder *encoding.Decoder
 }

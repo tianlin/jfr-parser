@@ -44,7 +44,7 @@ func NewBindClassLoader(typ *def.Class, typeMap *def.TypeMap) *BindClassLoader {
 	return res
 }
 
-type ClassLoaderRef uint32
+type ClassLoaderRef uint64
 type ClassLoaderList struct {
 	IDMap       map[ClassLoaderRef]uint32
 	ClassLoader []ClassLoader
@@ -55,10 +55,15 @@ type ClassLoader struct {
 	Name SymbolRef
 }
 
+func (this *ClassLoaderList) Reset() {
+	this.IDMap = make(map[ClassLoaderRef]uint32)
+	this.ClassLoader = nil
+}
 func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *def.TypeMap) (pos int, err error) {
 	var (
 		v64_  uint64
 		v32_  uint32
+		v16_  uint16
 		s_    string
 		b_    byte
 		shift = uint(0)
@@ -66,6 +71,7 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 	)
 	_ = v64_
 	_ = v32_
+	_ = v16_
 	_ = s_
 	v32_ = uint32(0)
 	for shift = uint(0); ; shift += 7 {
@@ -83,25 +89,28 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 		}
 	}
 	n := int(v32_)
-	this.IDMap = make(map[ClassLoaderRef]uint32, n)
-	this.ClassLoader = make([]ClassLoader, n)
+	if this.ClassLoader == nil {
+		this.ClassLoader = make([]ClassLoader, 0, max(n, 128))
+	}
 	for i := 0; i < n; i++ {
-		v32_ = uint32(0)
-		for shift = uint(0); ; shift += 7 {
-			if shift >= 32 {
-				return 0, def.ErrIntOverflow
-			}
+		v64_ = 0
+		for shift = uint(0); shift <= 56; shift += 7 {
 			if pos >= l {
 				return 0, io.ErrUnexpectedEOF
 			}
 			b_ = data[pos]
 			pos++
-			v32_ |= uint32(b_&0x7F) << shift
-			if b_ < 0x80 {
+			if shift == 56 {
+				v64_ |= uint64(b_&0xFF) << shift
 				break
+			} else {
+				v64_ |= uint64(b_&0x7F) << shift
+				if b_ < 0x80 {
+					break
+				}
 			}
 		}
-		id := ClassLoaderRef(v32_)
+		id := ClassLoaderRef(v64_)
 		for bindFieldIndex := 0; bindFieldIndex < len(bind.Fields); bindFieldIndex++ {
 			bindArraySize := 1
 			if bind.Fields[bindFieldIndex].Field.Array {
@@ -124,29 +133,31 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 			}
 			for bindArrayIndex := 0; bindArrayIndex < bindArraySize; bindArrayIndex++ {
 				if bind.Fields[bindFieldIndex].Field.ConstantPool {
-					v32_ = uint32(0)
-					for shift = uint(0); ; shift += 7 {
-						if shift >= 32 {
-							return 0, def.ErrIntOverflow
-						}
+					v64_ = 0
+					for shift = uint(0); shift <= 56; shift += 7 {
 						if pos >= l {
 							return 0, io.ErrUnexpectedEOF
 						}
 						b_ = data[pos]
 						pos++
-						v32_ |= uint32(b_&0x7F) << shift
-						if b_ < 0x80 {
+						if shift == 56 {
+							v64_ |= uint64(b_&0xFF) << shift
 							break
+						} else {
+							v64_ |= uint64(b_&0x7F) << shift
+							if b_ < 0x80 {
+								break
+							}
 						}
 					}
 					switch bind.Fields[bindFieldIndex].Field.Type {
 					case typeMap.T_CLASS:
 						if bind.Fields[bindFieldIndex].ClassRef != nil {
-							*bind.Fields[bindFieldIndex].ClassRef = ClassRef(v32_)
+							*bind.Fields[bindFieldIndex].ClassRef = ClassRef(v64_)
 						}
 					case typeMap.T_SYMBOL:
 						if bind.Fields[bindFieldIndex].SymbolRef != nil {
-							*bind.Fields[bindFieldIndex].SymbolRef = SymbolRef(v32_)
+							*bind.Fields[bindFieldIndex].SymbolRef = SymbolRef(v64_)
 						}
 					}
 				} else {
@@ -186,6 +197,66 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 							bs := data[pos : pos+int(v32_)]
 							s_ = *(*string)(unsafe.Pointer(&bs))
 							pos += int(v32_)
+						case 5:
+							v32_ = uint32(0)
+							for shift = uint(0); ; shift += 7 {
+								if shift >= 32 {
+									return 0, def.ErrIntOverflow
+								}
+								if pos >= l {
+									return 0, io.ErrUnexpectedEOF
+								}
+								b_ = data[pos]
+								pos++
+								v32_ |= uint32(b_&0x7F) << shift
+								if b_ < 0x80 {
+									break
+								}
+							}
+							if pos+int(v32_) > l {
+								return 0, io.ErrUnexpectedEOF
+							}
+							bs := data[pos : pos+int(v32_)]
+							bs, _ = typeMap.ISO8859_1Decoder.Bytes(bs)
+							s_ = *(*string)(unsafe.Pointer(&bs))
+							pos += int(v32_)
+						case 4:
+							v32_ = uint32(0)
+							for shift = uint(0); ; shift += 7 {
+								if shift >= 32 {
+									return 0, def.ErrIntOverflow
+								}
+								if pos >= l {
+									return 0, io.ErrUnexpectedEOF
+								}
+								b_ = data[pos]
+								pos++
+								v32_ |= uint32(b_&0x7F) << shift
+								if b_ < 0x80 {
+									break
+								}
+							}
+							bl := int(v32_)
+							buf := make([]rune, bl)
+							for i := 0; i < bl; i++ {
+								v32_ = uint32(0)
+								for shift = uint(0); ; shift += 7 {
+									if shift >= 32 {
+										return 0, def.ErrIntOverflow
+									}
+									if pos >= l {
+										return 0, io.ErrUnexpectedEOF
+									}
+									b_ = data[pos]
+									pos++
+									v32_ |= uint32(b_&0x7F) << shift
+									if b_ < 0x80 {
+										break
+									}
+								}
+								buf[i] = rune(v32_)
+							}
+							s_ = string(buf)
 						default:
 							return 0, fmt.Errorf("unknown string type %d at %d", b_, pos)
 						}
@@ -226,6 +297,23 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 							}
 						}
 						// skipping
+					case typeMap.T_SHORT:
+						v16_ = uint16(0)
+						for shift = uint(0); ; shift += 7 {
+							if shift >= 16 {
+								return 0, def.ErrIntOverflow
+							}
+							if pos >= l {
+								return 0, io.ErrUnexpectedEOF
+							}
+							b_ = data[pos]
+							pos++
+							v16_ |= uint16(b_&0x7F) << shift
+							if b_ < 0x80 {
+								break
+							}
+						}
+						// skipping
 					case typeMap.T_BOOLEAN:
 						if pos >= l {
 							return 0, io.ErrUnexpectedEOF
@@ -253,7 +341,7 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 					default:
 						bindFieldType := typeMap.IDMap[bind.Fields[bindFieldIndex].Field.Type]
 						if bindFieldType == nil || len(bindFieldType.Fields) == 0 {
-							return 0, fmt.Errorf("unknown type %d", bind.Fields[bindFieldIndex].Field.Type)
+							return 0, fmt.Errorf("unknown type %d %+v", bind.Fields[bindFieldIndex].Field.Type, bindFieldType)
 						}
 						bindSkipObjects := 1
 						if bind.Fields[bindFieldIndex].Field.Array {
@@ -327,6 +415,66 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 										bs := data[pos : pos+int(v32_)]
 										s_ = *(*string)(unsafe.Pointer(&bs))
 										pos += int(v32_)
+									case 5:
+										v32_ = uint32(0)
+										for shift = uint(0); ; shift += 7 {
+											if shift >= 32 {
+												return 0, def.ErrIntOverflow
+											}
+											if pos >= l {
+												return 0, io.ErrUnexpectedEOF
+											}
+											b_ = data[pos]
+											pos++
+											v32_ |= uint32(b_&0x7F) << shift
+											if b_ < 0x80 {
+												break
+											}
+										}
+										if pos+int(v32_) > l {
+											return 0, io.ErrUnexpectedEOF
+										}
+										bs := data[pos : pos+int(v32_)]
+										bs, _ = typeMap.ISO8859_1Decoder.Bytes(bs)
+										s_ = *(*string)(unsafe.Pointer(&bs))
+										pos += int(v32_)
+									case 4:
+										v32_ = uint32(0)
+										for shift = uint(0); ; shift += 7 {
+											if shift >= 32 {
+												return 0, def.ErrIntOverflow
+											}
+											if pos >= l {
+												return 0, io.ErrUnexpectedEOF
+											}
+											b_ = data[pos]
+											pos++
+											v32_ |= uint32(b_&0x7F) << shift
+											if b_ < 0x80 {
+												break
+											}
+										}
+										bl := int(v32_)
+										buf := make([]rune, bl)
+										for i := 0; i < bl; i++ {
+											v32_ = uint32(0)
+											for shift = uint(0); ; shift += 7 {
+												if shift >= 32 {
+													return 0, def.ErrIntOverflow
+												}
+												if pos >= l {
+													return 0, io.ErrUnexpectedEOF
+												}
+												b_ = data[pos]
+												pos++
+												v32_ |= uint32(b_&0x7F) << shift
+												if b_ < 0x80 {
+													break
+												}
+											}
+											buf[i] = rune(v32_)
+										}
+										s_ = string(buf)
 									default:
 										return 0, fmt.Errorf("unknown string type %d at %d", b_, pos)
 									}
@@ -380,6 +528,22 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 											}
 										}
 									}
+								} else if bindSkipFieldType == typeMap.T_SHORT {
+									v16_ = uint16(0)
+									for shift = uint(0); ; shift += 7 {
+										if shift >= 16 {
+											return 0, def.ErrIntOverflow
+										}
+										if pos >= l {
+											return 0, io.ErrUnexpectedEOF
+										}
+										b_ = data[pos]
+										pos++
+										v16_ |= uint16(b_&0x7F) << shift
+										if b_ < 0x80 {
+											break
+										}
+									}
 								} else if bindSkipFieldType == typeMap.T_BOOLEAN {
 									if pos >= l {
 										return 0, io.ErrUnexpectedEOF
@@ -395,8 +559,8 @@ func (this *ClassLoaderList) Parse(data []byte, bind *BindClassLoader, typeMap *
 				}
 			}
 		}
-		this.ClassLoader[i] = bind.Temp
-		this.IDMap[id] = uint32(i)
+		this.ClassLoader = append(this.ClassLoader, bind.Temp)
+		this.IDMap[id] = uint32(len(this.ClassLoader) - 1)
 	}
 	return pos, nil
 }

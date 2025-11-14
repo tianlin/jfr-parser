@@ -6,16 +6,18 @@ import (
 )
 
 const (
-	sampleTypeCPU        = 0
-	sampleTypeWall       = 1
-	sampleTypeInTLAB     = 2
-	sampleTypeOutTLAB    = 3
-	sampleTypeLock       = 4
-	sampleTypeThreadPark = 5
-	sampleTypeLiveObject = 6
+	sampleTypeCPU         = 0
+	sampleTypeWall        = 1
+	sampleTypeInTLAB      = 2
+	sampleTypeOutTLAB     = 3
+	sampleTypeLock        = 4
+	sampleTypeThreadPark  = 5
+	sampleTypeLiveObject  = 6
+	sampleTypeAllocSample = 7
+	sampleTypeMalloc      = 8
 )
 
-func newJfrPprofBuilders(p *parser.Parser, jfrLabels *LabelsSnapshot, piOriginal *ParseInput) *jfrPprofBuilders {
+func newJfrPprofBuilders(p *parser.Parser, jfrLabels *LabelsSnapshot, piOriginal *ParseInput, opt *pprofOptions) *jfrPprofBuilders {
 	st := piOriginal.StartTime.UnixNano()
 	et := piOriginal.EndTime.UnixNano()
 	var period int64
@@ -32,6 +34,7 @@ func newJfrPprofBuilders(p *parser.Parser, jfrLabels *LabelsSnapshot, piOriginal
 		timeNanos:     st,
 		durationNanos: et - st,
 		period:        period,
+		opt:           opt,
 	}
 	return res
 }
@@ -43,12 +46,16 @@ type jfrPprofBuilders struct {
 	timeNanos     int64
 	durationNanos int64
 	period        int64
+	opt           *pprofOptions
+
+	metrics ParseMetrics
 }
 
-func (b *jfrPprofBuilders) addStacktrace(sampleType int64, contextID uint64, ref types.StackTraceRef, values []int64) {
+func (b *jfrPprofBuilders) addStacktrace(sampleType int64, correlation StacktraceCorrelation, ref types.StackTraceRef, values []int64) {
 	p := b.profileBuilderForSampleType(sampleType)
 	st := b.parser.GetStacktrace(ref)
 	if st == nil {
+		b.metrics.StacktraceNotFound++
 		return
 	}
 
@@ -62,13 +69,17 @@ func (b *jfrPprofBuilders) addStacktrace(sampleType int64, contextID uint64, ref
 		}
 	}
 
-	sample := p.FindExternalSampleWithLabels(uint64(ref), contextID)
+	sample := p.FindExternalSampleWithCorrelation(uint64(ref), correlation)
 	if sample != nil {
 		addValues(sample.Value)
 		return
 	}
 
-	locations := make([]uint64, 0, len(st.Frames))
+	nLocs := len(st.Frames)
+	if b.opt.truncatedFrame && st.Truncated {
+		nLocs += 1
+	}
+	locations := make([]uint64, 0, nLocs)
 	for i := 0; i < len(st.Frames); i++ {
 		f := st.Frames[i]
 		extLocID := ExternalLocationID{
@@ -89,6 +100,7 @@ func (b *jfrPprofBuilders) addStacktrace(sampleType int64, contextID uint64, ref
 			} else {
 				cls := b.parser.GetClass(m.Type)
 				if cls == nil {
+					b.metrics.ClassNotFound++
 					continue
 				}
 				clsName := b.parser.GetSymbolString(cls.Name)
@@ -98,13 +110,16 @@ func (b *jfrPprofBuilders) addStacktrace(sampleType int64, contextID uint64, ref
 			}
 			loc = p.AddExternalLocation(extLocID, pprofFuncID)
 			locations = append(locations, uint64(loc))
-
-			//todo remove Scratch field from the Method
+		} else {
+			b.metrics.MethodNotFound++
 		}
+	}
+	if b.opt.truncatedFrame && st.Truncated {
+		locations = append(locations, p.getTruncatedLocation())
 	}
 	vs := make([]int64, len(values))
 	addValues(vs)
-	p.AddExternalSampleWithLabels(locations, vs, b.contextLabels(contextID), b.jfrLabels, uint64(ref), contextID)
+	p.AddExternalSampleWithLabels(locations, vs, b.contextLabels(correlation.ContextId), b.jfrLabels, uint64(ref), correlation)
 }
 
 func (b *jfrPprofBuilders) profileBuilderForSampleType(sampleType int64) *ProfileBuilder {
@@ -146,6 +161,15 @@ func (b *jfrPprofBuilders) profileBuilderForSampleType(sampleType int64) *Profil
 	case sampleTypeLiveObject:
 		builder.AddSampleType("live", "count")
 		builder.PeriodType("objects", "count")
+		metric = "memory"
+	case sampleTypeAllocSample:
+		builder.AddSampleType("alloc_sample_objects", "count")
+		builder.AddSampleType("alloc_sample_bytes", "bytes")
+		builder.PeriodType("space", "bytes")
+		metric = "memory"
+	case sampleTypeMalloc:
+		builder.AddSampleType("malloc_objects", "count")
+		builder.AddSampleType("malloc_bytes", "bytes")
 		metric = "memory"
 	}
 	builder.MetricName(metric)

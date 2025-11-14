@@ -1,19 +1,18 @@
 package pprof
 
 import (
-	"compress/gzip"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	gpprof "github.com/google/pprof/profile"
 	profilev1 "github.com/grafana/pyroscope/api/gen/proto/go/google/v1"
-	"github.com/k0kubun/pp/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,26 +22,172 @@ const doDump = false
 
 type testdata struct {
 	jfr, labels   string
+	testName      string
 	expectedCount int
+	options       []Option
 }
 
-var testfiles = []testdata{
-	{"example", "", 4},
-	{"async-profiler", "", 3}, // -e cpu -i 10ms --alloc 512k --wall 200ms --lock 10ms -d 60 (async-profiler 2.10)
-	{"goland", "", 5},
-	{"goland-multichunk", "", 5},
-	{"FastSlow_2024_01_16_180855", "", 2}, // from IJ Ultimate, multichunk, chunked CP
-	{"cortex-dev-01__kafka-0__cpu__0", "", 1},
-	{"cortex-dev-01__kafka-0__cpu__1", "", 1},
-	{"cortex-dev-01__kafka-0__cpu__2", "", 1},
-	{"cortex-dev-01__kafka-0__cpu__3", "", 1},
-	{"cortex-dev-01__kafka-0__cpu_lock0_alloc0__0", "", 5},
-	{"cortex-dev-01__kafka-0__cpu_lock_alloc__0", "", 2},
-	{"cortex-dev-01__kafka-0__cpu_lock_alloc__1", "", 2},
-	{"cortex-dev-01__kafka-0__cpu_lock_alloc__2", "", 2},
-	{"cortex-dev-01__kafka-0__cpu_lock_alloc__3", "", 2},
-	{"dump1", "dump1.labels.pb.gz", 1},
-	{"dump2", "dump2.labels.pb.gz", 4},
+var testFiles = []testdata{
+	{
+		jfr:           "example",
+		labels:        "",
+		expectedCount: 4,
+		options:       nil,
+	},
+
+	{
+		jfr:           "async-profiler",
+		labels:        "",
+		expectedCount: 3,
+		options:       nil,
+	},
+	{
+		jfr:           "goland",
+		labels:        "",
+		expectedCount: 5,
+		options:       nil,
+	},
+	{
+		jfr:           "goland-multichunk",
+		labels:        "",
+		expectedCount: 5,
+		options:       nil,
+	},
+	{
+		jfr:           "FastSlow_2024_01_16_180855",
+		labels:        "",
+		expectedCount: 3,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu__0",
+		labels:        "",
+		expectedCount: 1,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu__1",
+		labels:        "",
+		expectedCount: 1,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu__2",
+		labels:        "",
+		expectedCount: 1,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu__3",
+		labels:        "",
+		expectedCount: 1,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu_lock0_alloc0__0",
+		labels:        "",
+		expectedCount: 5,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu_lock_alloc__0",
+		labels:        "",
+		expectedCount: 2,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu_lock_alloc__1",
+		labels:        "",
+		expectedCount: 2,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu_lock_alloc__2",
+		labels:        "",
+		expectedCount: 2,
+		options:       nil,
+	},
+	{
+		jfr:           "cortex-dev-01__kafka-0__cpu_lock_alloc__3",
+		labels:        "",
+		expectedCount: 2,
+		options:       nil,
+	},
+	{
+		jfr:           "dump1",
+		labels:        "dump1.labels.pb.gz",
+		expectedCount: 1,
+		options:       nil,
+	},
+	{
+		jfr:           "dump2",
+		labels:        "dump2.labels.pb.gz",
+		expectedCount: 4,
+		options:       nil,
+	},
+	{
+		jfr:           "dd-trace-java",
+		labels:        "",
+		expectedCount: 4,
+		options:       nil,
+	},
+	{
+		jfr:           "cpool-uint64-constant-index",
+		labels:        "",
+		expectedCount: 5,
+		options:       nil,
+	},
+	{
+		jfr:           "event-with-type-zero",
+		labels:        "",
+		expectedCount: 5,
+		options:       nil,
+	},
+	{
+		jfr:           "event-with-type-zero",
+		testName:      "event-with-type-zero with truncated frame",
+		labels:        "",
+		expectedCount: 5,
+		options:       []Option{WithTruncatedFrame(true)},
+	},
+	{
+		jfr:           "object-allocation-sample",
+		labels:        "",
+		expectedCount: 3,
+		options:       nil,
+	},
+	{
+		jfr:           "uint64-ref-id",
+		labels:        "",
+		expectedCount: 5,
+		options:       nil,
+	},
+
+	{
+		jfr:           "parse_failure_repro1",
+		labels:        "",
+		expectedCount: 1,
+		options:       nil,
+	},
+
+	{
+		jfr:           "wall_tick_sample",
+		labels:        "",
+		expectedCount: 1,
+		options:       nil,
+	},
+	{
+		jfr:           "nativemem",
+		labels:        "",
+		expectedCount: 1,
+		options:       nil,
+	},
+	{
+		jfr:           "new_spancontext",
+		labels:        "new_spancontext.labels.gz",
+		expectedCount: 1,
+		options:       nil,
+	},
 }
 
 type gprofile struct {
@@ -62,59 +207,93 @@ var parseInput = &ParseInput{
 }
 
 func TestParse(t *testing.T) {
-	for _, testfile := range testfiles {
-		mypp := pp.New()
-		mypp.SetColoringEnabled(false)
-		mypp.SetExportedOnly(true)
-		t.Run(testfile.jfr, func(t *testing.T) {
-			jfrFile := testdataDir + testfile.jfr + ".jfr.gz"
-			jfr := readGzipFile(t, jfrFile)
-			ls := readLabels(t, testfile)
-
-			profiles, err := ParseJFR(jfr, parseInput, ls)
-			require.NoError(t, err)
-
-			gprofiles := toGoogleProfiles(t, profiles.Profiles)
-			profiles = nil
-
-			slices.SortFunc(gprofiles, func(i, j gprofile) int {
-				return strings.Compare(i.metric, j.metric)
-			})
-			assert.Equal(t, testfile.expectedCount, len(gprofiles))
-
-			for i, profile := range gprofiles {
-				actual := profileToString(t, profile)
-				actualCollapsed := stackCollapseProto(profile.proto, true)
-				expectedFile := fmt.Sprintf("%s%s_%d_%s_expected.txt.gz", testdataDir, testfile.jfr, i, profile.metric)
-				expectedCollapsedFile := fmt.Sprintf("%s%s_%d_%s_expected_collapsed.txt.gz", testdataDir, testfile.jfr, i, profile.metric)
-				assert.NotEmpty(t, actual)
-				assert.NotEmpty(t, actualCollapsed)
-				if doDump {
-					writeGzipFile(t, expectedFile, []byte(actual))
-					writeGzipFile(t, expectedCollapsedFile, []byte(actualCollapsed))
-				} else {
-					expected := readGzipFile(t, expectedFile)
-					require.NoError(t, err)
-					expectedCollapsed := readGzipFile(t, expectedCollapsedFile)
-					require.NoError(t, err)
-
-					assert.Equal(t, string(expected), actual)
-					assert.Equal(t, string(expectedCollapsed), actualCollapsed)
-
-					if string(expected) != actual {
-						os.WriteFile("actual.txt", []byte(actual), 0644)
-						os.WriteFile("expected.txt", expected, 0644)
-					}
-
-					if string(expectedCollapsed) != actualCollapsed {
-						os.WriteFile("actual_collapsed.txt", []byte(actualCollapsed), 0644)
-						os.WriteFile("expected_collapsed.txt", expectedCollapsed, 0644)
-					}
-				}
+	for _, td := range testFiles {
+		t.Run(testName(td), func(t *testing.T) {
+			for i, r := range testDataReaders() {
+				t.Run(strconv.Itoa(i), func(t *testing.T) {
+					testOne(t, td, r)
+				})
 			}
 		})
 	}
 }
+
+func testName(td testdata) string {
+	if td.testName != "" {
+		return td.testName
+	}
+	return td.jfr
+}
+
+func testOne(t *testing.T, td testdata, r testdataReader) {
+	jfrFile := testdataDir + td.jfr + ".jfr.gz"
+	jfr, jfrCleanup := r(t, jfrFile)
+	ls, lsCleanup := readLabels(t, td, r)
+	cleanup := func() {
+		jfrCleanup()
+		lsCleanup()
+	}
+	defer cleanup()
+
+	profiles, err := ParseJFR(jfr, parseInput, ls, td.options...)
+	require.NoError(t, err)
+	cleanup()
+
+	assert.Equal(t, 0, profiles.ParseMetrics.StacktraceNotFound)
+	assert.Equal(t, 0, profiles.ParseMetrics.ClassNotFound)
+	assert.Equal(t, 0, profiles.ParseMetrics.MethodNotFound)
+
+	gprofiles := toGoogleProfiles(t, profiles.Profiles)
+	profiles = nil
+
+	slices.SortFunc(gprofiles, func(i, j gprofile) int {
+		return strings.Compare(i.metric, j.metric)
+	})
+	assert.Equal(t, td.expectedCount, len(gprofiles))
+
+	for i, profile := range gprofiles {
+		actual := profileToString(t, profile)
+		actualCollapsed := stackCollapseProto(profile.proto, true)
+		testFileName := fmt.Sprintf("%s_%d_%s", td.jfr, i, profile.metric)
+		if td.testName != "" {
+			re := regexp.MustCompile("[^a-zA-Z0-9_]+")
+			testFileName = testFileName + "_" + re.ReplaceAllLiteralString(td.testName, "_")
+		}
+		expectedFile := filepath.Join(testdataDir, fmt.Sprintf("%s_expected.txt.gz", testFileName))
+		filePprofDump := filepath.Join(testdataDir, "pprofs", fmt.Sprintf("%s.pprof.gz", testFileName))
+		expectedCollapsedFile := filepath.Join(testdataDir, fmt.Sprintf("%s_expected_collapsed.txt.gz", testFileName))
+		assert.NotEmpty(t, actual)
+		assert.NotEmpty(t, actualCollapsed)
+		if doDump {
+			profile.proto.TimeNanos = time.Now().UnixNano()
+			pprof, err := profile.proto.MarshalVT()
+			require.NoError(t, err)
+			writeGzipFile(t, filePprofDump, pprof)
+			writeGzipFile(t, expectedFile, []byte(actual))
+			writeGzipFile(t, expectedCollapsedFile, []byte(actualCollapsed))
+		} else {
+			expected := readGzipFile(t, expectedFile)
+			require.NoError(t, err)
+			expectedCollapsed := readGzipFile(t, expectedCollapsedFile)
+			require.NoError(t, err)
+
+			assert.Equal(t, string(expected), actual)
+			assert.Equal(t, string(expectedCollapsed), actualCollapsed)
+
+			if string(expected) != actual {
+				os.WriteFile("actual.txt", []byte(actual), 0644)
+				os.WriteFile("expected.txt", expected, 0644)
+			}
+
+			if string(expectedCollapsed) != actualCollapsed {
+				os.WriteFile("actual_collapsed.txt", []byte(actualCollapsed), 0644)
+				os.WriteFile("expected_collapsed.txt", expectedCollapsed, 0644)
+			}
+		}
+	}
+}
+
+//todo add tests ingesting parsed testdata into pyroscope container/instance
 
 func profileToString(t *testing.T, profile gprofile) string {
 	res := profile.profile.String()
@@ -127,21 +306,12 @@ func profileToString(t *testing.T, profile gprofile) string {
 	return res
 }
 
-func readLabels(t testing.TB, td testdata) *LabelsSnapshot {
-	ls := new(LabelsSnapshot)
-	if td.labels != "" {
-		labelsBytes := readGzipFile(t, testdataDir+td.labels)
-		err := ls.UnmarshalVT(labelsBytes)
-		require.NoError(t, err)
-	}
-	return ls
-}
-
 func BenchmarkParse(b *testing.B) {
-	for _, testfile := range testfiles {
+	for _, testfile := range testFiles {
+		r := heapReader()
 		b.Run(testfile.jfr, func(b *testing.B) {
-			jfr := readGzipFile(b, testdataDir+testfile.jfr+".jfr.gz")
-			ls := readLabels(b, testfile)
+			jfr, _ := r(b, testdataDir+testfile.jfr+".jfr.gz")
+			ls, _ := readLabels(b, testfile, r)
 			b.ResetTimer()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
@@ -177,29 +347,6 @@ func sampleTypesToString(p *gpprof.Profile) string {
 		sh1 = sh1 + fmt.Sprintf("%s__%s%s ", s.Type, s.Unit, dflt)
 	}
 	return strings.TrimSpace(sh1)
-}
-
-func readGzipFile(t testing.TB, fname string) []byte {
-	f, err := os.Open(fname)
-	require.NoError(t, err)
-	defer f.Close()
-	r, err := gzip.NewReader(f)
-	require.NoError(t, err)
-	defer r.Close()
-	bs, err := ioutil.ReadAll(r)
-	require.NoError(t, err)
-	return bs
-}
-
-func writeGzipFile(t *testing.T, f string, data []byte) {
-	fd, err := os.OpenFile(f, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
-	require.NoError(t, err)
-	defer fd.Close()
-	g := gzip.NewWriter(fd)
-	_, err = g.Write(data)
-	require.NoError(t, err)
-	err = g.Close()
-	require.NoError(t, err)
 }
 
 func stackCollapseProto(p *profilev1.Profile, lineNumbers bool) string {
@@ -279,4 +426,8 @@ func stackCollapseProto(p *profilev1.Profile, lineNumbers bool) string {
 		res = append(res, fmt.Sprintf("%s %v", s.funcs, s.value))
 	}
 	return strings.Join(res, "\n")
+}
+
+func TestProfileId(t *testing.T) {
+	assert.Equal(t, "00000000000000ef", profileIdString(0xef))
 }

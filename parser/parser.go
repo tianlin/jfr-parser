@@ -48,10 +48,15 @@ type Parser struct {
 	Symbols      types2.SymbolList
 	LogLevels    types2.LogLevelList
 	Stacktrace   types2.StackTraceList
+	Strings      types2.StringList
 
 	ExecutionSample             types2.ExecutionSample
+	WallClockSample             types2.WallClockSample
+	Malloc                      types2.Malloc
+	Free                        types2.Free
 	ObjectAllocationInNewTLAB   types2.ObjectAllocationInNewTLAB
 	ObjectAllocationOutsideTLAB types2.ObjectAllocationOutsideTLAB
+	ObjectAllocationSample      types2.ObjectAllocationSample
 	JavaMonitorEnter            types2.JavaMonitorEnter
 	ThreadPark                  types2.ThreadPark
 	LiveObject                  types2.LiveObject
@@ -76,15 +81,20 @@ type Parser struct {
 	bindLogLevel    *types2.BindLogLevel
 	bindStackFrame  *types2.BindStackFrame
 	bindStackTrace  *types2.BindStackTrace
+	bindString      *types2.BindString
 
 	bindExecutionSample *types2.BindExecutionSample
 
 	bindAllocInNewTLAB   *types2.BindObjectAllocationInNewTLAB
 	bindAllocOutsideTLAB *types2.BindObjectAllocationOutsideTLAB
+	bindAllocSample      *types2.BindObjectAllocationSample
 	bindMonitorEnter     *types2.BindJavaMonitorEnter
 	bindThreadPark       *types2.BindThreadPark
 	bindLiveObject       *types2.BindLiveObject
 	bindActiveSetting    *types2.BindActiveSetting
+	bindWallClockSample  *types2.BindWallClockSample
+	bindMalloc           *types2.BindMalloc
+	bindFree             *types2.BindFree
 }
 
 func NewParser(buf []byte, options Options) *Parser {
@@ -136,6 +146,39 @@ func (p *Parser) ParseEvent() (def.TypeID, error) {
 			}
 			p.pos = pp + int(size)
 			return ttyp, nil
+		case p.TypeMap.T_WALL_CLOCK_SAMPLE:
+			if p.bindWallClockSample == nil {
+				p.pos = pp + int(size) // skip
+				continue
+			}
+			_, err := p.WallClockSample.Parse(p.buf[p.pos:], p.bindWallClockSample, &p.TypeMap)
+			if err != nil {
+				return 0, err
+			}
+			p.pos = pp + int(size)
+			return ttyp, nil
+		case p.TypeMap.T_MALLOC:
+			if p.bindMalloc == nil {
+				p.pos = pp + int(size) // skip
+				continue
+			}
+			_, err := p.Malloc.Parse(p.buf[p.pos:], p.bindMalloc, &p.TypeMap)
+			if err != nil {
+				return 0, err
+			}
+			p.pos = pp + int(size)
+			return ttyp, nil
+		case p.TypeMap.T_FREE:
+			if p.bindFree == nil {
+				p.pos = pp + int(size) // skip
+				continue
+			}
+			_, err := p.Free.Parse(p.buf[p.pos:], p.bindFree, &p.TypeMap)
+			if err != nil {
+				return 0, err
+			}
+			p.pos = pp + int(size)
+			return ttyp, nil
 		case p.TypeMap.T_ALLOC_IN_NEW_TLAB:
 			if p.bindAllocInNewTLAB == nil {
 				p.pos = pp + int(size) // skip
@@ -153,6 +196,16 @@ func (p *Parser) ParseEvent() (def.TypeID, error) {
 				continue
 			}
 			_, err := p.ObjectAllocationOutsideTLAB.Parse(p.buf[p.pos:], p.bindAllocOutsideTLAB, &p.TypeMap)
+			if err != nil {
+				return 0, err
+			}
+			p.pos = pp + int(size)
+			return ttyp, nil
+		case p.TypeMap.T_ALLOC_SAMPLE:
+			if p.bindAllocSample == nil {
+				p.pos = pp + int(size) // skip
+			}
+			_, err := p.ObjectAllocationSample.Parse(p.buf[p.pos:], p.bindAllocSample, &p.TypeMap)
 			if err != nil {
 				return 0, err
 			}
@@ -239,19 +292,8 @@ func (p *Parser) GetThreadInfo(ref types2.ThreadRef) *types2.Thread {
 }
 
 func (p *Parser) GetMethod(mID types2.MethodRef) *types2.Method {
-	if mID == 0 {
-		return nil
-	}
-	var idx int
-
-	refIDX := int(mID)
-	if refIDX < len(p.Methods.IDMap.Slice) {
-		idx = int(p.Methods.IDMap.Slice[mID])
-	} else {
-		idx = p.Methods.IDMap.Get(mID)
-	}
-
-	if idx == -1 {
+	idx, ok := p.Methods.IDMap[mID]
+	if !ok || int(idx) >= len(p.Methods.Method) {
 		return nil
 	}
 	return &p.Methods.Method[idx]
@@ -423,6 +465,7 @@ func (p *Parser) checkTypes() error {
 
 	tint := p.TypeMap.NameMap["int"]
 	tlong := p.TypeMap.NameMap["long"]
+	tshort := p.TypeMap.NameMap["short"]
 	tfloat := p.TypeMap.NameMap["float"]
 	tboolean := p.TypeMap.NameMap["boolean"]
 	tstring := p.TypeMap.NameMap["java.lang.String"]
@@ -432,6 +475,9 @@ func (p *Parser) checkTypes() error {
 	}
 	if tlong == nil {
 		return fmt.Errorf("missing \"long\"")
+	}
+	if tshort == nil {
+		return fmt.Errorf("missing \"short\"")
 	}
 	if tfloat == nil {
 		return fmt.Errorf("missing \"float\"")
@@ -444,6 +490,7 @@ func (p *Parser) checkTypes() error {
 	}
 	p.TypeMap.T_INT = tint.ID
 	p.TypeMap.T_LONG = tlong.ID
+	p.TypeMap.T_SHORT = tshort.ID
 	p.TypeMap.T_FLOAT = tfloat.ID
 	p.TypeMap.T_BOOLEAN = tboolean.ID
 	p.TypeMap.T_STRING = tstring.ID
@@ -496,7 +543,7 @@ func (p *Parser) checkTypes() error {
 	if typeCPLogLevel != nil {
 		p.TypeMap.T_LOG_LEVEL = typeCPLogLevel.ID
 	} else {
-		p.TypeMap.T_LOG_LEVEL = 0
+		p.TypeMap.T_LOG_LEVEL = -1
 	}
 	p.TypeMap.T_STACK_TRACE = typeCPStackTrace.ID
 	p.TypeMap.T_CLASS_LOADER = typeCPClassLoader.ID
@@ -522,52 +569,114 @@ func (p *Parser) checkTypes() error {
 	}
 	p.bindStackTrace = types2.NewBindStackTrace(typeCPStackTrace, &p.TypeMap)
 	p.bindStackFrame = types2.NewBindStackFrame(typeStackFrame, &p.TypeMap)
+	p.bindString = types2.NewBindString(tstring, &p.TypeMap)
 
 	typeExecutionSample := p.TypeMap.NameMap["jdk.ExecutionSample"]
+	typeWallClockSample := p.TypeMap.NameMap["profiler.WallClockSample"]
 	typeAllocInNewTLAB := p.TypeMap.NameMap["jdk.ObjectAllocationInNewTLAB"]
 	typeALlocOutsideTLAB := p.TypeMap.NameMap["jdk.ObjectAllocationOutsideTLAB"]
+	typeAllocSample := p.TypeMap.NameMap["jdk.ObjectAllocationSample"]
 	typeMonitorEnter := p.TypeMap.NameMap["jdk.JavaMonitorEnter"]
 	typeThreadPark := p.TypeMap.NameMap["jdk.ThreadPark"]
 	typeLiveObject := p.TypeMap.NameMap["profiler.LiveObject"]
 	typeActiveSetting := p.TypeMap.NameMap["jdk.ActiveSetting"]
 
+	typeMalloc := p.TypeMap.NameMap["profiler.Malloc"]
+	typeFree := p.TypeMap.NameMap["profiler.Free"]
+
 	if typeExecutionSample != nil {
 		p.TypeMap.T_EXECUTION_SAMPLE = typeExecutionSample.ID
 		p.bindExecutionSample = types2.NewBindExecutionSample(typeExecutionSample, &p.TypeMap)
+	} else {
+		p.TypeMap.T_EXECUTION_SAMPLE = -1
+		p.bindExecutionSample = nil
 	}
+	if typeWallClockSample != nil {
+		p.TypeMap.T_WALL_CLOCK_SAMPLE = typeWallClockSample.ID
+		p.bindWallClockSample = types2.NewBindWallClockSample(typeWallClockSample, &p.TypeMap)
+	} else {
+		p.TypeMap.T_WALL_CLOCK_SAMPLE = -1
+		p.bindWallClockSample = nil
+	}
+	if typeMalloc != nil {
+		p.TypeMap.T_MALLOC = typeMalloc.ID
+		p.bindMalloc = types2.NewBindMalloc(typeMalloc, &p.TypeMap)
+	} else {
+		p.TypeMap.T_MALLOC = -1
+		p.bindMalloc = nil
+	}
+
+	if typeFree != nil {
+		p.TypeMap.T_FREE = typeFree.ID
+		p.bindFree = types2.NewBindFree(typeFree, &p.TypeMap)
+	} else {
+		p.TypeMap.T_FREE = -1
+		p.bindFree = nil
+	}
+
 	if typeAllocInNewTLAB != nil {
 		p.TypeMap.T_ALLOC_IN_NEW_TLAB = typeAllocInNewTLAB.ID
 		p.bindAllocInNewTLAB = types2.NewBindObjectAllocationInNewTLAB(typeAllocInNewTLAB, &p.TypeMap)
+	} else {
+		p.TypeMap.T_ALLOC_IN_NEW_TLAB = -1
+		p.bindAllocInNewTLAB = nil
 	}
+
 	if typeALlocOutsideTLAB != nil {
 		p.TypeMap.T_ALLOC_OUTSIDE_TLAB = typeALlocOutsideTLAB.ID
 		p.bindAllocOutsideTLAB = types2.NewBindObjectAllocationOutsideTLAB(typeALlocOutsideTLAB, &p.TypeMap)
+	} else {
+		p.TypeMap.T_ALLOC_OUTSIDE_TLAB = -1
+		p.bindAllocOutsideTLAB = nil
+	}
+	if typeAllocSample != nil {
+		p.TypeMap.T_ALLOC_SAMPLE = typeAllocSample.ID
+		p.bindAllocSample = types2.NewBindObjectAllocationSample(typeAllocSample, &p.TypeMap)
+	} else {
+		p.TypeMap.T_ALLOC_SAMPLE = -1
+		p.bindAllocSample = nil
 	}
 	if typeMonitorEnter != nil {
 		p.TypeMap.T_MONITOR_ENTER = typeMonitorEnter.ID
 		p.bindMonitorEnter = types2.NewBindJavaMonitorEnter(typeMonitorEnter, &p.TypeMap)
+	} else {
+		p.TypeMap.T_MONITOR_ENTER = -1
+		p.bindMonitorEnter = nil
 	}
+
 	if typeThreadPark != nil {
 		p.TypeMap.T_THREAD_PARK = typeThreadPark.ID
 		p.bindThreadPark = types2.NewBindThreadPark(typeThreadPark, &p.TypeMap)
+	} else {
+		p.TypeMap.T_THREAD_PARK = -1
+		p.bindThreadPark = nil
 	}
+
 	if typeLiveObject != nil {
 		p.TypeMap.T_LIVE_OBJECT = typeLiveObject.ID
 		p.bindLiveObject = types2.NewBindLiveObject(typeLiveObject, &p.TypeMap)
+	} else {
+		p.TypeMap.T_LIVE_OBJECT = -1
+		p.bindLiveObject = nil
 	}
+
 	if typeActiveSetting != nil {
 		p.TypeMap.T_ACTIVE_SETTING = typeActiveSetting.ID
 		p.bindActiveSetting = types2.NewBindActiveSetting(typeActiveSetting, &p.TypeMap)
+	} else {
+		p.TypeMap.T_ACTIVE_SETTING = -1
+		p.bindActiveSetting = nil
 	}
 
-	p.FrameTypes.IDMap = nil
-	p.ThreadStates.IDMap = nil
-	p.Threads.IDMap = nil
-	p.Classes.IDMap = nil
-	p.Methods.IDMap.Slice = nil
-	p.Packages.IDMap = nil
-	p.Symbols.IDMap = nil
-	p.LogLevels.IDMap = nil
-	p.Stacktrace.IDMap = nil
+	p.FrameTypes.Reset()
+	p.ThreadStates.Reset()
+	p.Threads.Reset()
+	p.Classes.Reset()
+	p.Methods.Reset()
+	p.Packages.Reset()
+	p.Symbols.Reset()
+	p.LogLevels.Reset()
+	p.Stacktrace.Reset()
+	p.Strings.Reset()
 	return nil
 }
