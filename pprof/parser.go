@@ -3,7 +3,6 @@ package pprof
 import (
 	"fmt"
 	"io"
-	"strconv"
 
 	"github.com/grafana/jfr-parser/parser"
 )
@@ -53,10 +52,6 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 	var event string
 
 	builders := newJfrPprofBuilders(parser, jfrLabels, piOriginal, opt)
-	stringIndex := map[string]int64{}
-	for k, v := range jfrLabels.Strings {
-		stringIndex[v] = k
-	}
 
 	var values = [2]int64{1, 0}
 
@@ -71,38 +66,6 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 
 		switch typ {
 		case parser.TypeMap.T_EXECUTION_SAMPLE:
-			ctxId := int64(parser.ExecutionSample.ContextId)
-			ctx := builders.contextLabels(uint64(ctxId))
-			if ctx == nil {
-				ctx = &Context{
-					Labels: make(map[int64]int64),
-				}
-				if builders.jfrLabels.Contexts == nil {
-					builders.jfrLabels.Contexts = make(map[int64]*Context)
-				}
-				builders.jfrLabels.Contexts[ctxId] = ctx
-			}
-
-			var hasThreadInfo bool
-			for kIndex := range ctx.Labels {
-				if builders.jfrLabels.Strings[kIndex] == "thread_id" {
-					hasThreadInfo = true
-				}
-			}
-
-			if !hasThreadInfo {
-				ti := parser.GetThreadInfo(parser.ExecutionSample.SampledThread)
-				if ti != nil {
-					k := addString(builders.jfrLabels, stringIndex, "thread_id")
-					v := addString(builders.jfrLabels, stringIndex,
-						strconv.FormatInt(int64(ti.OsThreadId), 10))
-					ctx.Labels[k] = v
-					k = addString(builders.jfrLabels, stringIndex, "thread_name")
-					v = addString(builders.jfrLabels, stringIndex, ti.OsName)
-					ctx.Labels[k] = v
-				}
-			}
-
 			ts := parser.GetThreadState(parser.ExecutionSample.State)
 			correlation := StacktraceCorrelation{
 				ContextId: parser.ExecutionSample.ContextId,
@@ -114,9 +77,6 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 			}
 			if event == "wall" {
 				builders.addStacktrace(sampleTypeWall, correlation, parser.ExecutionSample.StackTrace, values[:1])
-			}
-			if ctxId == 0 {
-				delete(builders.jfrLabels.Contexts, ctxId)
 			}
 		case parser.TypeMap.T_WALL_CLOCK_SAMPLE:
 			values[0] = int64(parser.WallClockSample.Samples)
@@ -167,19 +127,4 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 	result = builders.build(event)
 
 	return result, nil
-}
-
-func addString(jfrLabels *LabelsSnapshot, stringIndex map[string]int64, s string) int64 {
-	if i, ok := stringIndex[s]; ok {
-		return i
-	}
-
-	if jfrLabels.Strings == nil {
-		jfrLabels.Strings = make(map[int64]string)
-	}
-
-	i := int64(len(stringIndex) + 1)
-	jfrLabels.Strings[i] = s
-	stringIndex[s] = i
-	return i
 }
