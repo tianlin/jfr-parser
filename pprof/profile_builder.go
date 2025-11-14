@@ -133,6 +133,8 @@ func (m *ProfileBuilder) AddExternalSampleWithLabels(locs []uint64, values []int
 	}
 	const LabelProfileId = "profile_id"
 	const LabelSpanName = "span_name"
+	const LabelThreadId = "thread_id"
+	const LabelThreadName = "thread_name"
 	capacity := 0
 	if labelsCtx != nil {
 		capacity += len(labelsCtx.Labels)
@@ -141,6 +143,12 @@ func (m *ProfileBuilder) AddExternalSampleWithLabels(locs []uint64, values []int
 		capacity++
 	}
 	if correlation.SpanName != 0 {
+		capacity++
+	}
+	if correlation.ThreadId != 0 {
+		capacity++
+	}
+	if correlation.ThreadName != 0 {
 		capacity++
 	}
 	if labelsCtx != nil {
@@ -168,6 +176,22 @@ func (m *ProfileBuilder) AddExternalSampleWithLabels(locs []uint64, values []int
 			})
 		}
 	}
+	if correlation.ThreadId != 0 {
+		sample.Label = append(sample.Label, &profilev1.Label{
+			Key:  m.addString(LabelThreadId),
+			Num:  int64(correlation.ThreadId),
+			NumUnit: m.addString(""),
+		})
+	}
+	if correlation.ThreadName != 0 {
+		threadName := labelsSnapshot.Strings[int64(correlation.ThreadName)]
+		if threadName != "" {
+			sample.Label = append(sample.Label, &profilev1.Label{
+				Key: m.addString(LabelThreadName),
+				Str: m.addString(threadName),
+			})
+		}
+	}
 }
 
 func profileIdString(profileId uint64) string {
@@ -177,9 +201,11 @@ func profileIdString(profileId uint64) string {
 }
 
 type StacktraceCorrelation struct {
-	ContextId uint64
-	SpanId    uint64
-	SpanName  uint64
+	ContextId  uint64
+	SpanId     uint64
+	SpanName   uint64
+	ThreadId   uint64
+	ThreadName uint64
 }
 
 // FindExternalSampleWithLabels deprecated

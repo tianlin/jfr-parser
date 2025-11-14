@@ -67,10 +67,24 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 		switch typ {
 		case parser.TypeMap.T_EXECUTION_SAMPLE:
 			ts := parser.GetThreadState(parser.ExecutionSample.State)
+			// Get thread information
+			var threadId, threadName uint64
+			ti := parser.GetThreadInfo(parser.ExecutionSample.SampledThread)
+			if ti != nil {
+				threadId = ti.OsThreadId
+				if ti.JavaName != "" {
+					threadName = builders.addStringToLabels(ti.JavaName)
+				} else if ti.OsName != "" {
+					threadName = builders.addStringToLabels(ti.OsName)
+				}
+			}
+
 			correlation := StacktraceCorrelation{
-				ContextId: parser.ExecutionSample.ContextId,
-				SpanId:    parser.ExecutionSample.SpanId,
-				SpanName:  parser.ExecutionSample.SpanName,
+				ContextId:  parser.ExecutionSample.ContextId,
+				SpanId:     parser.ExecutionSample.SpanId,
+				SpanName:   parser.ExecutionSample.SpanName,
+				ThreadId:   threadId,
+				ThreadName: threadName,
 			}
 			if ts != nil && ts.Name != "STATE_SLEEPING" {
 				builders.addStacktrace(sampleTypeCPU, correlation, parser.ExecutionSample.StackTrace, values[:1])
@@ -83,18 +97,46 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 			builders.addStacktrace(sampleTypeWall, StacktraceCorrelation{}, parser.WallClockSample.StackTrace, values[:1])
 		case parser.TypeMap.T_ALLOC_IN_NEW_TLAB:
 			values[1] = int64(parser.ObjectAllocationInNewTLAB.TlabSize)
+			// Get thread information
+			var threadId, threadName uint64
+			ti := parser.GetThreadInfo(parser.ObjectAllocationInNewTLAB.EventThread)
+			if ti != nil {
+				threadId = ti.OsThreadId
+				if ti.JavaName != "" {
+					threadName = builders.addStringToLabels(ti.JavaName)
+				} else if ti.OsName != "" {
+					threadName = builders.addStringToLabels(ti.OsName)
+				}
+			}
+
 			correlation := StacktraceCorrelation{
-				ContextId: parser.ObjectAllocationInNewTLAB.ContextId,
-				SpanId:    parser.ObjectAllocationInNewTLAB.SpanId,
-				SpanName:  parser.ObjectAllocationInNewTLAB.SpanName,
+				ContextId:  parser.ObjectAllocationInNewTLAB.ContextId,
+				SpanId:     parser.ObjectAllocationInNewTLAB.SpanId,
+				SpanName:   parser.ObjectAllocationInNewTLAB.SpanName,
+				ThreadId:   threadId,
+				ThreadName: threadName,
 			}
 			builders.addStacktrace(sampleTypeInTLAB, correlation, parser.ObjectAllocationInNewTLAB.StackTrace, values[:2])
 		case parser.TypeMap.T_ALLOC_OUTSIDE_TLAB:
 			values[1] = int64(parser.ObjectAllocationOutsideTLAB.AllocationSize)
+			// Get thread information
+			var threadId, threadName uint64
+			ti := parser.GetThreadInfo(parser.ObjectAllocationOutsideTLAB.EventThread)
+			if ti != nil {
+				threadId = ti.OsThreadId
+				if ti.JavaName != "" {
+					threadName = builders.addStringToLabels(ti.JavaName)
+				} else if ti.OsName != "" {
+					threadName = builders.addStringToLabels(ti.OsName)
+				}
+			}
+
 			correlation := StacktraceCorrelation{
-				ContextId: parser.ObjectAllocationOutsideTLAB.ContextId,
-				SpanId:    parser.ObjectAllocationOutsideTLAB.SpanId,
-				SpanName:  parser.ObjectAllocationOutsideTLAB.SpanName,
+				ContextId:  parser.ObjectAllocationOutsideTLAB.ContextId,
+				SpanId:     parser.ObjectAllocationOutsideTLAB.SpanId,
+				SpanName:   parser.ObjectAllocationOutsideTLAB.SpanName,
+				ThreadId:   threadId,
+				ThreadName: threadName,
 			}
 			builders.addStacktrace(sampleTypeOutTLAB, correlation, parser.ObjectAllocationOutsideTLAB.StackTrace, values[:2])
 		case parser.TypeMap.T_ALLOC_SAMPLE:
@@ -102,10 +144,24 @@ func parse(parser *parser.Parser, piOriginal *ParseInput, jfrLabels *LabelsSnaps
 			builders.addStacktrace(sampleTypeAllocSample, StacktraceCorrelation{}, parser.ObjectAllocationSample.StackTrace, values[:2])
 		case parser.TypeMap.T_MONITOR_ENTER:
 			values[1] = int64(parser.JavaMonitorEnter.Duration)
+			// Get thread information
+			var threadId, threadName uint64
+			ti := parser.GetThreadInfo(parser.JavaMonitorEnter.EventThread)
+			if ti != nil {
+				threadId = ti.OsThreadId
+				if ti.JavaName != "" {
+					threadName = builders.addStringToLabels(ti.JavaName)
+				} else if ti.OsName != "" {
+					threadName = builders.addStringToLabels(ti.OsName)
+				}
+			}
+
 			correlation := StacktraceCorrelation{
-				ContextId: parser.JavaMonitorEnter.ContextId,
-				SpanId:    parser.JavaMonitorEnter.SpanId,
-				SpanName:  parser.JavaMonitorEnter.SpanName,
+				ContextId:  parser.JavaMonitorEnter.ContextId,
+				SpanId:     parser.JavaMonitorEnter.SpanId,
+				SpanName:   parser.JavaMonitorEnter.SpanName,
+				ThreadId:   threadId,
+				ThreadName: threadName,
 			}
 			builders.addStacktrace(sampleTypeLock, correlation, parser.JavaMonitorEnter.StackTrace, values[:2])
 		case parser.TypeMap.T_THREAD_PARK:

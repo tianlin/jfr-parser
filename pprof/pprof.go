@@ -27,6 +27,16 @@ func newJfrPprofBuilders(p *parser.Parser, jfrLabels *LabelsSnapshot, piOriginal
 		period = 1e9 / int64(piOriginal.SampleRate)
 	}
 
+	// Find the maximum string ID in jfrLabels to avoid conflicts
+	var maxStringID int64 = 0
+	if jfrLabels != nil && jfrLabels.Strings != nil {
+		for id := range jfrLabels.Strings {
+			if id > maxStringID {
+				maxStringID = id
+			}
+		}
+	}
+
 	res := &jfrPprofBuilders{
 		parser:        p,
 		builders:      make(map[int64]*ProfileBuilder),
@@ -35,6 +45,8 @@ func newJfrPprofBuilders(p *parser.Parser, jfrLabels *LabelsSnapshot, piOriginal
 		durationNanos: et - st,
 		period:        period,
 		opt:           opt,
+		nextStringID:  maxStringID + 1,
+		stringToID:    make(map[string]int64),
 	}
 	return res
 }
@@ -48,7 +60,9 @@ type jfrPprofBuilders struct {
 	period        int64
 	opt           *pprofOptions
 
-	metrics ParseMetrics
+	metrics       ParseMetrics
+	nextStringID  int64
+	stringToID    map[string]int64
 }
 
 func (b *jfrPprofBuilders) addStacktrace(sampleType int64, correlation StacktraceCorrelation, ref types.StackTraceRef, values []int64) {
@@ -182,6 +196,40 @@ func (b *jfrPprofBuilders) contextLabels(contextID uint64) *Context {
 		return nil
 	}
 	return b.jfrLabels.Contexts[int64(contextID)]
+}
+
+func (b *jfrPprofBuilders) addStringToLabels(s string) uint64 {
+	if b.jfrLabels == nil {
+		return 0
+	}
+	if s == "" {
+		return 0
+	}
+
+	// Check if string already exists in our cache
+	if id, ok := b.stringToID[s]; ok {
+		return uint64(id)
+	}
+
+	// Check if string already exists in jfrLabels
+	if b.jfrLabels.Strings != nil {
+		for id, existing := range b.jfrLabels.Strings {
+			if existing == s {
+				b.stringToID[s] = id
+				return uint64(id)
+			}
+		}
+	}
+
+	// Add new string
+	if b.jfrLabels.Strings == nil {
+		b.jfrLabels.Strings = make(map[int64]string)
+	}
+	id := b.nextStringID
+	b.jfrLabels.Strings[id] = s
+	b.stringToID[s] = id
+	b.nextStringID++
+	return uint64(id)
 }
 
 func (b *jfrPprofBuilders) build(jfrEvent string) *Profiles {
